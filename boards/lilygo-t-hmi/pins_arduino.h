@@ -90,9 +90,9 @@ static const uint8_t MISO = SPI_SCK_PIN;
 #define MINBRIGHT (uint8_t)1
 
 // Font Sizes#
-#define FP 1
-#define FM 2
-#define FG 3
+#define BRUCE_FP 1
+#define BRUCE_FM 2
+#define BRUCE_FG 3
 
 // Battery PIN
 #define PWR_EN_PIN 10

@@ -90,9 +90,9 @@ static const uint8_t ADC2 = 8;
 #define NRF24_SCK_PIN SPI_SCK_PIN
 #define NRF24_MISO_PIN SPI_MISO_PIN
 
-#define FP 1
-#define FM 2
-#define FG 3
+#define BRUCE_FP 1
+#define BRUCE_FM 2
+#define BRUCE_FG 3
 
 #define HAS_SCREEN 1
 #define ROTATION 1

@@ -1,0 +1,27 @@
+name: Fox-hunt native tests
+
+# Host-compiled unit tests for the pure fox-hunt / direction-finding core
+# (src/modules/foxhunt). No Arduino/ESP deps, so a plain g++ build runs them in
+# seconds. Triggers on pushes touching the module or its tests.
+on:
+  push:
+    paths:
+      - "src/modules/foxhunt/**"
+      - "test/foxhunt/**"
+      - ".github/workflows/foxhunt_native_test.yml"
+  workflow_dispatch:
+
+jobs:
+  native-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Fox-hunt core tests
+        run: |
+          g++ -std=gnu++17 -Wall -O2 \
+            -Isrc/modules/foxhunt -Itest/foxhunt \
+            test/foxhunt/test_foxhunt.cpp \
+            src/modules/foxhunt/fox_hunt_detector.cpp \
+            -o foxhunt_tests
+          ./foxhunt_tests

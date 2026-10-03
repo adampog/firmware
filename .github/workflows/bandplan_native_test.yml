@@ -1,0 +1,27 @@
+name: Band-plan native tests
+
+# Host-compiled unit tests for the pure WiFi band-plan core
+# (src/modules/wifi/band_plan). No Arduino/ESP deps, so a plain g++ build runs
+# them in seconds. Triggers on pushes touching the module or its tests.
+on:
+  push:
+    paths:
+      - "src/modules/wifi/band_plan.*"
+      - "test/bandplan/**"
+      - ".github/workflows/bandplan_native_test.yml"
+  workflow_dispatch:
+
+jobs:
+  native-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Band-plan core tests
+        run: |
+          g++ -std=gnu++17 -Wall -O2 \
+            -Isrc/modules/wifi -Itest/bandplan \
+            test/bandplan/test_bandplan.cpp \
+            src/modules/wifi/band_plan.cpp \
+            -o bandplan_tests
+          ./bandplan_tests

@@ -1,0 +1,39 @@
+name: Remote-ID native tests
+
+# Host-compiled unit tests for the pure Remote-ID core (src/modules/remoteid).
+# The decoder/model have no Arduino/ESP dependencies, so a plain g++ build runs
+# them in seconds — no PlatformIO native env needed. Triggers on pushes that
+# touch the module or its tests, and can be run manually.
+on:
+  push:
+    paths:
+      - "src/modules/remoteid/**"
+      - "test/remoteid/**"
+      - ".github/workflows/remoteid_native_test.yml"
+  workflow_dispatch:
+
+jobs:
+  native-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Decoder tests
+        run: |
+          g++ -std=gnu++17 -Wall -O2 \
+            -Isrc/modules/remoteid -Itest/remoteid \
+            test/remoteid/test_remote_id_decoder.cpp \
+            src/modules/remoteid/RemoteIdModel.cpp \
+            src/modules/remoteid/RemoteIdDecoder.cpp \
+            -o decoder_tests
+          ./decoder_tests
+
+      - name: Model tests
+        run: |
+          g++ -std=gnu++17 -Wall -O2 \
+            -Isrc/modules/remoteid -Itest/remoteid \
+            test/remoteid/test_remote_id_model.cpp \
+            src/modules/remoteid/RemoteIdModel.cpp \
+            src/modules/remoteid/RemoteIdDecoder.cpp \
+            -o model_tests
+          ./model_tests

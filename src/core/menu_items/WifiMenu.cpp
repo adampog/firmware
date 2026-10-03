@@ -22,6 +22,9 @@
 #include "modules/wifi/channel_analyzer.h"
 #include "modules/wifi/jam_detect.h"
 #include "modules/wifi/wifi_recover.h"
+#include "modules/remoteid/remote_id_scan.h"
+#include "modules/pinescan/pine_scan.h"
+#include "modules/foxhunt/fox_hunt.h"
 #endif
 
 // #include "modules/reverseShell/reverseShell.h"
@@ -75,6 +78,15 @@ void WifiMenu::optionsMenu() {
     options.push_back({"Sniffer", sniffer_setup});
     options.push_back({"Channel Analyzer", channel_analyzer_setup});
     options.push_back({"Jam Detect", jam_detect_setup});
+#ifdef BRUCE_REMOTEID
+    options.push_back({"Remote ID", remoteIdScanScreen});
+#endif
+#ifdef BRUCE_PINESCAN
+    options.push_back({"Pineapple Detect", pineScanScreen});
+#endif
+#ifdef BRUCE_FOXHUNT
+    options.push_back({"Fox Hunt", foxHuntScreen});
+#endif
     options.push_back({"Scan Hosts", [=]() {
                            bool doScan = true;
                            if (!WiFi.isConnected()) doScan = wifiConnectMenu();

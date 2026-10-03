@@ -109,9 +109,9 @@ static const uint8_t SCL = GROVE_SCL;
 #define MINBRIGHT (uint8_t)1
 
 // Font Sizes
-#define FP 1
-#define FM 2
-#define FG 3
+#define BRUCE_FP 1
+#define BRUCE_FM 2
+#define BRUCE_FG 3
 
 // SD Card
 #define SDCARD_CS 21
