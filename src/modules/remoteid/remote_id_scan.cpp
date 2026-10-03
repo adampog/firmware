@@ -4,6 +4,7 @@
 #include "remote_id_scan.h"
 
 #ifdef BRUCE_REMOTEID
+#pragma message("Bruce Remote-ID (OpenDroneID) capture: ENABLED")
 
 #include <Arduino.h>
 
