@@ -12,6 +12,7 @@
 #include <esp_event.h>
 #include <esp_netif.h>
 #include <globals.h>
+#include <nvs_flash.h>
 
 static TaskHandle_t timezoneTaskHandle = NULL;
 static bool wifiTransitioning = false;
@@ -49,6 +50,26 @@ void ensureWifiPlatform() {
         eventLoopCreated = true;
         portEXIT_CRITICAL(&platformMux);
     }
+}
+
+void wifiStartPassivePromiscuous(wifi_promiscuous_cb_t rxCallback, uint8_t channel) {
+    ensureWifiPlatform();
+    nvs_flash_init();
+    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
+    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
+    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
+    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_NULL)); // passive: no beacon TX
+    ESP_ERROR_CHECK(esp_wifi_start());
+    esp_wifi_set_promiscuous(true);
+    esp_wifi_set_promiscuous_rx_cb(rxCallback);
+    esp_wifi_set_channel(channel, WIFI_SECOND_CHAN_NONE);
+}
+
+void wifiStopPassivePromiscuous() {
+    esp_wifi_set_promiscuous(false);
+    esp_wifi_stop();
+    esp_wifi_set_promiscuous_rx_cb(NULL);
+    wifiDisconnect();
 }
 
 bool _wifiConnect(const String &ssid, int encryption) {

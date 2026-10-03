@@ -59,6 +59,23 @@ void wifiConnectTask(void *pvParameters);
  */
 void ensureWifiPlatform();
 
+/**
+ * @brief Brings WiFi up in passive promiscuous (listen-only) mode.
+ *
+ * Shared by the listen-only capture modules (Remote-ID, PineScan, fox-hunt): inits
+ * WiFi in WIFI_MODE_NULL (no beacon/TX), enables promiscuous RX with @p rxCallback
+ * and parks on @p channel. Callers hop channels themselves via esp_wifi_set_channel().
+ * Mirrors sniffer.cpp's bring-up but stays passive, so the three ports no longer
+ * each copy the esp_wifi init sequence.
+ */
+void wifiStartPassivePromiscuous(wifi_promiscuous_cb_t rxCallback, uint8_t channel);
+
+/**
+ * @brief Tears down a wifiStartPassivePromiscuous() session: disables promiscuous,
+ *        stops WiFi, clears the RX callback, and powers the radio down.
+ */
+void wifiStopPassivePromiscuous();
+
 // private
 /**
  * @brief Connects to wifiNetwork

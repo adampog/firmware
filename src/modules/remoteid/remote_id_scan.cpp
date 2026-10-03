@@ -1,6 +1,7 @@
 // Drone Remote-ID (OpenDroneID) WiFi capture for Bruce. See remote_id_scan.h.
 // Merge/lifecycle logic adapted from ESP32Marauder's WiFiScanRemoteId.h; WiFi
-// promiscuous setup/teardown mirrors Bruce's src/modules/wifi/sniffer.cpp.
+// promiscuous bring-up/teardown is the shared wifi_common helper (also used by
+// PineScan and fox-hunt), so the passive-capture sequence lives in one place.
 #include "remote_id_scan.h"
 
 #ifdef BRUCE_REMOTEID
@@ -8,11 +9,9 @@
 
 #include <Arduino.h>
 
-#include "esp_event.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "nvs_flash.h"
 
 #include <cstring>
 
@@ -21,7 +20,7 @@
 #include "core/display.h"          // tft, drawMainBorderWithTitle, bruceConfig, tftWidth/Height
 #include "core/mykeyboard.h"       // check(), EscPress
 #include "core/net_utils.h"        // macToString
-#include "core/wifi/wifi_common.h" // ensureWifiPlatform, wifiDisconnect
+#include "core/wifi/wifi_common.h" // wifiStart/StopPassivePromiscuous
 #include "modules/wifi/band_plan.h" // dual-band hop plan (ESP32-C5)
 #include <globals.h>               // returnToMenu
 
@@ -41,9 +40,12 @@ static constexpr uint32_t REMOTE_ID_STALE_MS = 30000;
 static constexpr uint32_t REMOTE_ID_SCAN_DEFAULT_MS = 30000;
 static constexpr uint32_t REMOTE_ID_HOP_MS = 250;
 
-// 2.4GHz channel plan, CH6 first (ASTM-preferred NAN channel). On the ESP32-C5
-// (-DBRUCE_DUALBAND) sweep the shared 2.4+5 GHz plan so 5 GHz Remote-ID beacons
-// are captured too.
+// 2.4GHz channel plan, CH6 FIRST. This intentionally diverges from band_plan's
+// kBruceChannels24 (which leads with CH1): Wi-Fi NAN Remote-ID uses channel 6 as
+// its fixed discovery channel, so leading with CH6 acquires NAN broadcasts a hop
+// sooner. Keep the divergence; it is not a leftover copy of the shared table.
+// On the ESP32-C5 (-DBRUCE_DUALBAND) sweep the shared 2.4+5 GHz plan so 5 GHz
+// Remote-ID beacons are captured too.
 #ifdef BRUCE_DUALBAND
 static const uint8_t *const kChannels = kBruceChannelsDualBand;
 static const size_t kChannelCount = kBruceChannelsDualBandCount;
@@ -295,7 +297,7 @@ static void dumpRecord(const RemoteIdRecord &r) {
     Serial.println(line);
 }
 
-// --- shared radio lifecycle (mirrors sniffer.cpp) ---
+// --- radio lifecycle (WiFi via wifi_common's shared passive helper + BLE) ---
 
 // Start a passive NimBLE scan feeding the OpenDroneID BLE decoder, concurrent with
 // WiFi promiscuous capture. NOTE: WiFi+BLE coexistence is only verifiable on
@@ -332,25 +334,13 @@ static void remoteIdStoreReset() {
 }
 
 static void remoteIdRadioStart() {
-    ensureWifiPlatform();
-    nvs_flash_init();
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_NULL)); // passive: no beacon TX
-    ESP_ERROR_CHECK(esp_wifi_start());
-    esp_wifi_set_promiscuous(true);
-    esp_wifi_set_promiscuous_rx_cb(remoteIdWifiCallback);
-    esp_wifi_set_channel(kChannels[0], WIFI_SECOND_CHAN_NONE);
+    wifiStartPassivePromiscuous(remoteIdWifiCallback, kChannels[0]);
     remoteIdBleStart();
 }
 
 static void remoteIdRadioStop() {
     remoteIdBleStop();
-    esp_wifi_set_promiscuous(false);
-    esp_wifi_stop();
-    esp_wifi_set_promiscuous_rx_cb(NULL);
-    wifiDisconnect();
+    wifiStopPassivePromiscuous();
 }
 
 void remoteIdScanRun(uint32_t durationMs) {

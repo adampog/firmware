@@ -1,6 +1,6 @@
 // WiFi Pineapple / Evil-Twin detector capture. See pine_scan.h.
-// Promiscuous capture + WiFi init/teardown mirror src/modules/wifi/sniffer.cpp /
-// src/modules/remoteid/remote_id_scan.cpp; classification is the pure core in
+// Promiscuous bring-up/teardown is the shared wifi_common passive helper (also
+// used by Remote-ID and fox-hunt); classification is the pure core in
 // pinescan_detector.{h,cpp}.
 #include "pine_scan.h"
 
@@ -8,18 +8,16 @@
 
 #include <Arduino.h>
 
-#include "esp_event.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "nvs_flash.h"
 
 #include <cstring>
 
 #include "core/display.h"          // tft, drawMainBorderWithTitle, bruceConfig, tftWidth/Height
 #include "core/mykeyboard.h"       // check(), EscPress
 #include "core/net_utils.h"        // macToString
-#include "core/wifi/wifi_common.h" // ensureWifiPlatform, wifiDisconnect
+#include "core/wifi/wifi_common.h" // wifiStart/StopPassivePromiscuous
 #include "modules/wifi/band_plan.h" // shared 2.4 / dual-band hop plan
 #include "pinescan_detector.h"
 #include <globals.h> // returnToMenu
@@ -141,25 +139,9 @@ static void pineScanReset() {
     portEXIT_CRITICAL(&g_mux);
 }
 
-static void pineScanRadioStart() {
-    ensureWifiPlatform();
-    nvs_flash_init();
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_NULL)); // passive
-    ESP_ERROR_CHECK(esp_wifi_start());
-    esp_wifi_set_promiscuous(true);
-    esp_wifi_set_promiscuous_rx_cb(pineScanWifiCallback);
-    esp_wifi_set_channel(kChannels[0], WIFI_SECOND_CHAN_NONE);
-}
+static void pineScanRadioStart() { wifiStartPassivePromiscuous(pineScanWifiCallback, kChannels[0]); }
 
-static void pineScanRadioStop() {
-    esp_wifi_set_promiscuous(false);
-    esp_wifi_stop();
-    esp_wifi_set_promiscuous_rx_cb(NULL);
-    wifiDisconnect();
-}
+static void pineScanRadioStop() { wifiStopPassivePromiscuous(); }
 
 static void dumpHit(const PineScanHit &h) {
     String line = "PINE," + macToString(h.mac) + ",ch=" + String(h.channel) + ",rssi=" + String(h.rssi) +

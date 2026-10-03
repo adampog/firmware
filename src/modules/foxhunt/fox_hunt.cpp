@@ -1,6 +1,7 @@
 // WiFi fox-hunt / direction-finding capture. See fox_hunt.h.
-// Promiscuous capture + WiFi init/teardown mirror src/modules/pinescan/pine_scan.cpp;
-// the matching + RSSI smoothing is the pure core in fox_hunt_detector.{h,cpp}.
+// Promiscuous bring-up/teardown is the shared wifi_common passive helper (also
+// used by Remote-ID and PineScan); the matching + RSSI smoothing is the pure
+// core in fox_hunt_detector.{h,cpp}.
 #include "fox_hunt.h"
 
 #ifdef BRUCE_FOXHUNT
@@ -8,18 +9,16 @@
 #include <Arduino.h>
 #include <WiFi.h>
 
-#include "esp_event.h"
 #include "esp_wifi.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
-#include "nvs_flash.h"
 
 #include <cstring>
 
 #include "core/display.h"          // tft, drawMainBorderWithTitle, bruceConfig, tftWidth/Height
 #include "core/mykeyboard.h"       // check(), EscPress
 #include "core/net_utils.h"        // macToString
-#include "core/wifi/wifi_common.h" // ensureWifiPlatform, wifiDisconnect
+#include "core/wifi/wifi_common.h" // wifiStart/StopPassivePromiscuous
 #include "fox_hunt_detector.h"
 #include "modules/wifi/band_plan.h" // bruceScanChannelPlan (dual-band on C5)
 #include <globals.h>                // returnToMenu, Option, loopOptions
@@ -120,28 +119,14 @@ static FoxSnapshot foxHuntSnapshot() {
     return s;
 }
 
-// --- shared radio lifecycle (WiFi-only passive promiscuous; mirrors pine_scan.cpp) ---
+// --- radio lifecycle (WiFi-only passive promiscuous via wifi_common helper) ---
 
 static void foxHuntRadioStart(uint8_t startChannel) {
-    ensureWifiPlatform();
-    nvs_flash_init();
-    wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_wifi_init(&cfg));
-    ESP_ERROR_CHECK(esp_wifi_set_storage(WIFI_STORAGE_RAM));
-    ESP_ERROR_CHECK(esp_wifi_set_mode(WIFI_MODE_NULL)); // passive
-    ESP_ERROR_CHECK(esp_wifi_start());
-    esp_wifi_set_promiscuous(true);
-    esp_wifi_set_promiscuous_rx_cb(foxHuntWifiCallback);
     if (startChannel == 0) startChannel = 1;
-    esp_wifi_set_channel(startChannel, WIFI_SECOND_CHAN_NONE);
+    wifiStartPassivePromiscuous(foxHuntWifiCallback, startChannel);
 }
 
-static void foxHuntRadioStop() {
-    esp_wifi_set_promiscuous(false);
-    esp_wifi_stop();
-    esp_wifi_set_promiscuous_rx_cb(NULL);
-    wifiDisconnect();
-}
+static void foxHuntRadioStop() { wifiStopPassivePromiscuous(); }
 
 // --- headless (serial) ---
 
