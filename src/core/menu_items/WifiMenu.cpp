@@ -25,6 +25,7 @@
 #include "modules/remoteid/remote_id_scan.h"
 #include "modules/pinescan/pine_scan.h"
 #include "modules/foxhunt/fox_hunt.h"
+#include "modules/dial/dial_cast.h"
 #endif
 
 // #include "modules/reverseShell/reverseShell.h"
@@ -86,6 +87,9 @@ void WifiMenu::optionsMenu() {
 #endif
 #ifdef BRUCE_FOXHUNT
     options.push_back({"Fox Hunt", foxHuntScreen});
+#endif
+#ifdef BRUCE_DIAL
+    options.push_back({"DIAL / Cast", dialCastScreen});
 #endif
     options.push_back({"Scan Hosts", [=]() {
                            bool doScan = true;
