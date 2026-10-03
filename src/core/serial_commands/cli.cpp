@@ -5,6 +5,7 @@
 #include "gpio_commands.h"
 #include "interpreter_commands.h"
 #include "ir_commands.h"
+#include "pinescan_commands.h"
 #include "power_commands.h"
 #include "remoteid_commands.h"
 #include "rf_commands.h"
@@ -46,6 +47,7 @@ void SerialCli::setup() {
     createUtilCommands(&_cli);
     createWifiCommands(&_cli);
     createRemoteIdCommands(&_cli); // no-op unless -DBRUCE_REMOTEID
+    createPineScanCommands(&_cli); // no-op unless -DBRUCE_PINESCAN
 
 #ifdef USB_as_HID
     createBadUsbCommands(&_cli);
