@@ -48,8 +48,6 @@ struct APInfo {
     uint8_t bssid[6];
     int channel;
     int band;
-    bool is_5ghz;
-    int frequency;
 };
 static std::vector<APInfo> sameSSID_APs;
 
@@ -187,6 +185,14 @@ int getWiFiBand(int channel) {
     return 0;
 }
 
+// True for the 5 GHz / 6 GHz bands, which use the extended deauth reason set.
+bool isWiFiHighBand(int band) { return band == 1 || band == 2; }
+
+// Human-readable label for a getWiFiBand() result.
+const char *getWiFiBandStr(int band) {
+    return (band == 1) ? "5GHz" : (band == 2) ? "6GHz" : "2.4GHz";
+}
+
 void cacheSameSSIDAPs() {
     sameSSID_APs.clear();
     String currentSSID = WiFi.SSID();
@@ -198,14 +204,6 @@ void cacheSameSSIDAPs() {
             memcpy(info.bssid, WiFi.BSSID((uint8_t)i), 6);
             info.channel = WiFi.channel((uint8_t)i);
             info.band = getWiFiBand(info.channel);
-            info.is_5ghz = (info.band == 1 || info.band == 2);
-            if (info.band == 1) {
-                info.frequency = 5000 + (info.channel - 36) * 20;
-            } else if (info.band == 2) {
-                info.frequency = 6000 + (info.channel - 1) * 20;
-            } else {
-                info.frequency = 2407 + info.channel * 5;
-            }
             sameSSID_APs.push_back(info);
         }
     }
@@ -213,7 +211,7 @@ void cacheSameSSIDAPs() {
 }
 
 const uint8_t *getDeauthReasons(int band, int *count) {
-    if (band == 1 || band == 2) {
+    if (isWiFiHighBand(band)) {
         *count = DEAUTH_REASONS_5GHZ_COUNT;
         return DEAUTH_REASONS_5GHZ;
     }
@@ -403,7 +401,7 @@ void stationDeauth(Host host, const uint8_t *apBssidIn) {
     }
 
     int band = getWiFiBand(channel);
-    bool is_5ghz = (band == 1 || band == 2);
+    bool is_5ghz = isWiFiHighBand(band);
     cacheSameSSIDAPs();
     bool useMultipleAPs = sameSSID_APs.size() > 1;
     std::vector<APInfo> ap_24ghz, ap_5ghz, ap_6ghz;
@@ -436,7 +434,7 @@ void stationDeauth(Host host, const uint8_t *apBssidIn) {
     tft.setTextSize(FP);
     padprintln("Target: " + host.mac);
     padprintln("AP: " + macToString(apBSSID));
-    String bandStr = (band == 1) ? "5GHz" : (band == 2) ? "6GHz" : "2.4GHz";
+    String bandStr = getWiFiBandStr(band);
     padprintln("CH:" + String(channel) + " (" + bandStr + ")");
     padprintln("Mode: AP");
     if (useMultipleAPs) { padprintln("Mesh: " + String(sameSSID_APs.size()) + " APs"); }
@@ -712,7 +710,7 @@ void runDeauthAll(uint8_t *targetMAC, int channel) {
     drawMainBorderWithTitle("Deauth All");
     tft.setTextSize(FP);
     padprintln("Deauthing all clients...");
-    String bandStr = (band == 1) ? "5GHz" : (band == 2) ? "6GHz" : "2.4GHz";
+    String bandStr = getWiFiBandStr(band);
     padprintln("Channel: " + String(channel) + " (" + bandStr + ")");
     padprintln("Mode: AP");
     if (useMultipleAPs) { padprintln("Mesh: " + String(sameSSID_APs.size()) + " APs"); }
@@ -857,7 +855,7 @@ void deauthAllByChannel() {
 
     options.clear();
     for (int ch = 1; ch <= 14; ch++) {
-        String band = (ch >= 1 && ch <= 11) ? "2.4GHz" : (ch >= 36 ? "5GHz" : "2.4GHz");
+        String band = getWiFiBandStr(getWiFiBand(ch));
         String optionText = "Channel " + String(ch) + " (" + band + ")";
         options.push_back({optionText.c_str(), [=]() {
                                uint8_t broadcast_mac[6] = {0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF};
@@ -907,7 +905,7 @@ void runDeauthTargetList(const std::vector<Host> &targets, uint8_t *targetMAC, i
     drawMainBorderWithTitle("Deauth List");
     tft.setTextSize(FP);
     padprintln("Deauthing " + String(targets.size()) + " targets...");
-    String bandStr = (band == 1) ? "5GHz" : (band == 2) ? "6GHz" : "2.4GHz";
+    String bandStr = getWiFiBandStr(band);
     padprintln("Channel: " + String(channel) + " (" + bandStr + ")");
     padprintln("Mode: AP");
     if (useMultipleAPs) { padprintln("Mesh: " + String(sameSSID_APs.size()) + " APs"); }
