@@ -13,6 +13,28 @@ jump. Do **not** merge three codebases literally — it is not feasible (see "Wh
 
 ---
 
+## Status — complete (2026-10-03)
+
+All planned ports landed on the `custom` branch and merged to `main`, each as a vertical slice
+(pure host-tested core + glue + `core/menu_items` screen + `core/serial_commands` entry +
+`BRUCE_<FEATURE>` capability flag), CI-green on the 8/16 MB build matrix:
+
+- ✅ **#1 Remote-ID** — OpenDroneID WiFi + BLE capture, on-device GPS radar
+- ✅ **#2 PineScan** — WiFi Pineapple / evil-twin (rogue-AP) classifier
+- ✅ **#3 Fox-hunt** — RSSI direction-finding / homing
+- ✅ **#4 Dual-band / 5 GHz** — shared band plan, ESP32-C5 5 GHz hopping
+- ✅ **#5 Unit tests** — host Unity suites for all five pure cores (remoteid, pinescan, foxhunt, bandplan, dial)
+- ✅ **#6 DIAL / cast** — SSDP discovery + DIAL REST status / launch / stop
+- ⚪ **#7 Surveillance-cam / network-device detection** — not pursued (per plan: low value, covered enough by #2)
+
+Plus the ✅ **§7 dedup pass** (shared `wifiStartPassivePromiscuous` helper).
+
+Deliberately deferred, optional follow-ups (noted in-tree): the YouTube **Lounge** video-cue
+flow on top of #6 (external HTTPS + private API), and two hardware-verify dedup refactors
+(Remote-ID BLE teardown + `radioHasMemForBle()` guard; a shared GPS accessor).
+
+---
+
 ## 1. Three-way comparison
 
 | Dimension | ESP32 Marauder | Bruce | Ghost ESP |
@@ -62,15 +84,15 @@ Bruce already implements the overlapping core, so these are **NOT ported** from 
 - Serial CLI, on-device menu, settings/NVS, SD storage → **Bruce core**
 
 ### Port INTO Bruce (unique, net-new) — from Marauder (same framework, low cost)
-1. **Drone Remote-ID receive/decode** (`RemoteIdDecoder`, `RemoteIdModel`) — Bruce lacks this.
-2. **Detection/defensive suite** (device/packet-type detection) — distinct from Bruce's set.
-3. **Fox-hunt / signal-direction** utility — unique.
-4. **Dual-band / 5 GHz scanning** path for ESP32-C5 — verify vs Bruce's C5 support; port if absent.
-5. (Optional) Marauder's **pure value-objects + Unity tests** — bring test discipline Bruce lacks.
+1. ✅ **Drone Remote-ID receive/decode** (`RemoteIdDecoder`, `RemoteIdModel`) — Bruce lacks this. **Done.**
+2. ✅ **Detection/defensive suite** (PineScan evil-twin classifier) — distinct from Bruce's set. **Done.**
+3. ✅ **Fox-hunt / signal-direction** utility — unique. **Done.**
+4. ✅ **Dual-band / 5 GHz scanning** path for ESP32-C5 (shared `band_plan`). **Done.**
+5. ✅ (Optional) Marauder's **pure value-objects + Unity tests** — brought across for all five cores. **Done.**
 
 ### Port INTO Bruce (unique, higher cost — IDF→Arduino reimplementation) — from Ghost
-6. **DIAL / cast integration** (Chromecast/DIAL client) — unique to Ghost; reimplement as a module.
-7. **Surveillance-camera / network-device detection** — if not covered by #2.
+6. ✅ **DIAL / cast integration** (Chromecast/DIAL client) — reimplemented as a module. **Done.**
+7. ⚪ **Surveillance-camera / network-device detection** — not pursued (covered enough by #2). **Skipped.**
 - Everything else in Ghost (LVGL UI, managers, RGB, mDNS/port-scan) is either duplicated by Bruce
   or not worth the archived-IDF porting cost. **Low priority / skip.**
 
@@ -103,16 +125,15 @@ builds include them.
 
 ## 5. Execution plan (incremental, on the `custom` branch of this Bruce fork)
 
-1. **Baseline build** — confirm the stock Bruce fork compiles for one 8MB target
-   (`m5stack-cardputer`) and one 16MB target (e.g. `lilygo-t-embed-cc1101`). Establishes the
-   known-good starting point before any ports.
-2. **Define a synthesis build env** per flash tier so ports are toggled by a single `-D`.
-3. **Port #1 Remote-ID** (self-contained, defensive, no overlap) as the first vertical slice —
-   module + menu + serial cmd + capability flag. Validates the porting pattern end-to-end.
-4. **Port #2–#4** (detection suite, fox-hunt, dual-band) following the same slice pattern.
-5. **(Optional) Port #6 DIAL/cast** from Ghost — budget a reimplementation, not a copy.
-6. **Test harness** — bring Marauder's Unity/native test setup across for the pure-logic modules.
-7. **Dedup pass** — remove any now-redundant code paths; ensure no feature exists twice.
+1. ✅ **Baseline build** — the fork compiles for an 8MB target (`m5stack-cardputer`) and a 16MB
+   target (`lilygo-t-embed-cc1101`); every port since is build-verified on both.
+2. ✅ **Define a synthesis build env** per flash tier so ports are toggled by a single `-D`.
+3. ✅ **Port #1 Remote-ID** (self-contained, defensive, no overlap) as the first vertical slice —
+   module + menu + serial cmd + capability flag. Validated the porting pattern end-to-end.
+4. ✅ **Port #2–#4** (PineScan detection, fox-hunt, dual-band) following the same slice pattern.
+5. ✅ **Port #6 DIAL/cast** from Ghost — reimplemented (not copied) onto Bruce's WiFiUDP + HTTPClient.
+6. ✅ **Test harness** — Marauder-style Unity/native host tests for all five pure-logic cores.
+7. ✅ **Dedup pass** — collapsed the duplicated passive-promiscuous bring-up into one shared helper.
 
 Nothing here adds attack capability beyond what these public tools already provide; the work is
 consolidation, deduplication, and build-system hygiene for authorized testing.
