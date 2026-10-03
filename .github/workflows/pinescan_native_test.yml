@@ -1,0 +1,27 @@
+name: PineScan native tests
+
+# Host-compiled unit tests for the pure PineScan (WiFi Pineapple / evil-twin)
+# classifier (src/modules/pinescan). No Arduino/ESP deps, so a plain g++ build
+# runs them in seconds. Triggers on pushes touching the module or its tests.
+on:
+  push:
+    paths:
+      - "src/modules/pinescan/**"
+      - "test/pinescan/**"
+      - ".github/workflows/pinescan_native_test.yml"
+  workflow_dispatch:
+
+jobs:
+  native-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: PineScan classifier tests
+        run: |
+          g++ -std=gnu++17 -Wall -O2 \
+            -Isrc/modules/pinescan -Itest/pinescan \
+            test/pinescan/test_pinescan.cpp \
+            src/modules/pinescan/pinescan_detector.cpp \
+            -o pinescan_tests
+          ./pinescan_tests
