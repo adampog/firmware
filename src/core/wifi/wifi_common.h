@@ -1,6 +1,7 @@
 #include "core/display.h"
 #include <NTPClient.h>
 #include <WiFi.h>
+#include <esp_wifi.h> // wifi_promiscuous_cb_t for wifiStartPassivePromiscuous()
 
 #ifndef __WIFI_COMMON_H__
 #define __WIFI_COMMON_H__
