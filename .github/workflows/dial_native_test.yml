@@ -1,0 +1,27 @@
+name: DIAL native tests
+
+# Host-compiled unit tests for the pure DIAL/cast protocol core
+# (src/modules/dial/dial_protocol). No Arduino/ESP deps, so a plain g++ build
+# runs them in seconds. Triggers on pushes touching the module or its tests.
+on:
+  push:
+    paths:
+      - "src/modules/dial/dial_protocol.*"
+      - "test/dial/**"
+      - ".github/workflows/dial_native_test.yml"
+  workflow_dispatch:
+
+jobs:
+  native-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: DIAL protocol core tests
+        run: |
+          g++ -std=gnu++17 -Wall -O2 \
+            -Isrc/modules/dial -Itest/dial \
+            test/dial/test_dial_protocol.cpp \
+            src/modules/dial/dial_protocol.cpp \
+            -o dial_tests
+          ./dial_tests
