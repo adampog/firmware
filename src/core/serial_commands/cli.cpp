@@ -2,6 +2,7 @@
 #include "badusb_commands.h"
 #include "core/sd_functions.h"
 #include "crypto_commands.h"
+#include "foxhunt_commands.h"
 #include "gpio_commands.h"
 #include "interpreter_commands.h"
 #include "ir_commands.h"
@@ -48,6 +49,7 @@ void SerialCli::setup() {
     createWifiCommands(&_cli);
     createRemoteIdCommands(&_cli); // no-op unless -DBRUCE_REMOTEID
     createPineScanCommands(&_cli); // no-op unless -DBRUCE_PINESCAN
+    createFoxHuntCommands(&_cli);  // no-op unless -DBRUCE_FOXHUNT
 
 #ifdef USB_as_HID
     createBadUsbCommands(&_cli);

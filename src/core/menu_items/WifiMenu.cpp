@@ -24,6 +24,7 @@
 #include "modules/wifi/wifi_recover.h"
 #include "modules/remoteid/remote_id_scan.h"
 #include "modules/pinescan/pine_scan.h"
+#include "modules/foxhunt/fox_hunt.h"
 #endif
 
 // #include "modules/reverseShell/reverseShell.h"
@@ -82,6 +83,9 @@ void WifiMenu::optionsMenu() {
 #endif
 #ifdef BRUCE_PINESCAN
     options.push_back({"Pineapple Detect", pineScanScreen});
+#endif
+#ifdef BRUCE_FOXHUNT
+    options.push_back({"Fox Hunt", foxHuntScreen});
 #endif
     options.push_back({"Scan Hosts", [=]() {
                            bool doScan = true;
