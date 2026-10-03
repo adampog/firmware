@@ -26,4 +26,8 @@ size_t remoteIdSnapshot(RemoteIdRecord *out, size_t capacity);
 // Number of drones currently in the detection store.
 size_t remoteIdDetectedCount();
 
+// On-device live scan: renders a scrolling list of detected drones and runs until
+// the user presses ESC (sets returnToMenu). Entry point for the WiFi menu.
+void remoteIdScanScreen();
+
 #endif // BRUCE_REMOTEID

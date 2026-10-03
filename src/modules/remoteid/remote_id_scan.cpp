@@ -17,8 +17,11 @@
 
 #include "RemoteIdDecoder.h"
 #include "RemoteIdModel.h"
-#include "core/net_utils.h"      // macToString
+#include "core/display.h"          // tft, drawMainBorderWithTitle, bruceConfig, tftWidth/Height
+#include "core/mykeyboard.h"       // check(), EscPress
+#include "core/net_utils.h"        // macToString
 #include "core/wifi/wifi_common.h" // ensureWifiPlatform, wifiDisconnect
+#include <globals.h>               // returnToMenu
 
 // Detection store capacity: generous on PSRAM boards, small otherwise.
 #ifdef BOARD_HAS_PSRAM
@@ -224,14 +227,15 @@ static void dumpRecord(const RemoteIdRecord &r) {
     Serial.println(line);
 }
 
-void remoteIdScanRun(uint32_t durationMs) {
-    if (durationMs == 0) durationMs = REMOTE_ID_SCAN_DEFAULT_MS;
+// --- shared radio lifecycle (mirrors sniffer.cpp) ---
 
+static void remoteIdStoreReset() {
     portENTER_CRITICAL(&g_mux);
     g_store.clear();
     portEXIT_CRITICAL(&g_mux);
+}
 
-    // Bring up the radio in passive promiscuous mode (mirrors sniffer.cpp init).
+static void remoteIdRadioStart() {
     ensureWifiPlatform();
     nvs_flash_init();
     wifi_init_config_t cfg = WIFI_INIT_CONFIG_DEFAULT();
@@ -242,6 +246,20 @@ void remoteIdScanRun(uint32_t durationMs) {
     esp_wifi_set_promiscuous(true);
     esp_wifi_set_promiscuous_rx_cb(remoteIdWifiCallback);
     esp_wifi_set_channel(kChannels[0], WIFI_SECOND_CHAN_NONE);
+}
+
+static void remoteIdRadioStop() {
+    esp_wifi_set_promiscuous(false);
+    esp_wifi_stop();
+    esp_wifi_set_promiscuous_rx_cb(NULL);
+    wifiDisconnect();
+}
+
+void remoteIdScanRun(uint32_t durationMs) {
+    if (durationMs == 0) durationMs = REMOTE_ID_SCAN_DEFAULT_MS;
+
+    remoteIdStoreReset();
+    remoteIdRadioStart();
 
     Serial.printf("[RID] scan started (%us); press any key to stop\n", durationMs / 1000);
 
@@ -273,11 +291,7 @@ void remoteIdScanRun(uint32_t durationMs) {
         vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 
-    // Teardown (mirrors sniffer.cpp; wifi_common owns deinit).
-    esp_wifi_set_promiscuous(false);
-    esp_wifi_stop();
-    esp_wifi_set_promiscuous_rx_cb(NULL);
-    wifiDisconnect();
+    remoteIdRadioStop();
 
     // Dump detections (radio is stopped, so the store is stable: no lock needed
     // across the whole loop, but copy each record under the lock defensively).
@@ -295,6 +309,85 @@ void remoteIdScanRun(uint32_t durationMs) {
         portEXIT_CRITICAL(&g_mux);
         if (ok) dumpRecord(rec);
     }
+}
+
+// --- on-device live list display ---
+
+static void remoteIdRenderList(uint8_t channel) {
+    tft.fillScreen(bruceConfig.bgColor);
+    drawMainBorderWithTitle("Remote ID");
+    tft.setTextSize(FP);
+    tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
+
+    const int16_t x = 8;
+    const int16_t lineH = LH * FP + 2;
+    int16_t y = BORDER_PAD_Y + FM * LH;
+
+    const size_t count = remoteIdDetectedCount();
+    tft.setCursor(x, y);
+    tft.print("Drones:" + String((unsigned)count) + "  CH:" + String(channel));
+    y += lineH + 2;
+
+    const int16_t bottom = tftHeight - lineH - 4; // leave room for footer
+    char transports[16];
+    for (size_t i = 0; i < count && y < bottom; ++i) {
+        RemoteIdRecord r;
+        bool ok = false;
+        portENTER_CRITICAL(&g_mux);
+        const RemoteIdRecord *p = g_store.at(i);
+        if (p != nullptr) {
+            r = *p;
+            ok = true;
+        }
+        portEXIT_CRITICAL(&g_mux);
+        if (!ok) continue;
+        remoteIdFormatTransports(r.transportMask, transports, sizeof(transports));
+        String id = r.hasUasId ? String(r.uasId) : macToString(r.mac);
+        tft.setTextColor(r.isLost ? TFT_DARKGREY : bruceConfig.priColor, bruceConfig.bgColor);
+        tft.setCursor(x, y);
+        tft.print(String(r.rssi) + " [" + String(transports) + "] " + id);
+        y += lineH;
+    }
+
+    tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
+    tft.setCursor(x, tftHeight - lineH - 2);
+    tft.print("ESC: exit");
+}
+
+void remoteIdScanScreen() {
+    returnToMenu = false;
+    remoteIdStoreReset();
+    remoteIdRadioStart();
+    tft.fillScreen(bruceConfig.bgColor);
+
+    size_t chIdx = 0;
+    uint32_t lastHop = millis(), lastPrune = millis(), lastRender = 0;
+    for (;;) {
+        if (returnToMenu) break;
+        if (check(EscPress)) {
+            returnToMenu = true;
+            break;
+        }
+        const uint32_t now = millis();
+        if (now - lastHop >= REMOTE_ID_HOP_MS) {
+            chIdx = (chIdx + 1) % kChannelCount;
+            esp_wifi_set_channel(kChannels[chIdx], WIFI_SECOND_CHAN_NONE);
+            lastHop = now;
+        }
+        if (now - lastPrune >= 1000) {
+            portENTER_CRITICAL(&g_mux);
+            g_store.updateLifecycle(now, REMOTE_ID_STALE_MS);
+            portEXIT_CRITICAL(&g_mux);
+            lastPrune = now;
+        }
+        if (now - lastRender >= 500) {
+            remoteIdRenderList(kChannels[chIdx]);
+            lastRender = now;
+        }
+        vTaskDelay(10 / portTICK_PERIOD_MS);
+    }
+
+    remoteIdRadioStop();
 }
 
 #endif // BRUCE_REMOTEID
