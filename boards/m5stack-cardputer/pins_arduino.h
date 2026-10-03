@@ -52,8 +52,10 @@ static const uint8_t G46 = 46;
 static const uint8_t ADC1 = 7;
 static const uint8_t ADC2 = 8;
 
-// (removed dead `#define SHIFT 0x80` -- unused, duplicated KEY_LEFT_CTRL, and its
-//  generic name collided with FastLED identifiers.)
+// Shift-bit OR'd into base keycodes in the keyboard matrix below (0x.. | SHIFT).
+// Keep as a macro: it is used throughout this header. (It collides with FastLED
+// 3.10.4+ identifiers, which is one reason FastLED is pinned to 3.10.3.)
+#define SHIFT 0x80
 #define KEY_LEFT_CTRL 0x80
 #define KEY_LEFT_SHIFT 0x81
 #define KEY_LEFT_ALT 0x82
