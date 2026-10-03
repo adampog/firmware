@@ -48,6 +48,54 @@ bool copyTrimmed(const char *begin, const char *end, char *out, size_t outSize) 
     return true;
 }
 
+// Locate the trimmed inner text of the first <tag> ... </tag> in xml[0..len),
+// setting [*outBegin,*outEnd) into the original buffer (no copy). Namespace- and
+// attribute-tolerant; skips self-closing <tag/>. Returns false if not found.
+bool findTagText(const char *xml, size_t len, const char *tag, const char **outBegin,
+                 const char **outEnd) {
+    if (xml == nullptr || tag == nullptr) return false;
+    const size_t tagLen = std::strlen(tag);
+    if (tagLen == 0) return false;
+    const char *p = xml;
+    const char *end = xml + len;
+    while (p < end) {
+        const char *lt = (const char *)std::memchr(p, '<', (size_t)(end - p));
+        if (lt == nullptr) return false;
+        const char *name = lt + 1;
+        if ((size_t)(end - name) > tagLen && std::memcmp(name, tag, tagLen) == 0) {
+            char boundary = name[tagLen];
+            if (boundary == '>' || boundary == ' ' || boundary == '\t' || boundary == '/' ||
+                boundary == '\r' || boundary == '\n') {
+                const char *gt = (const char *)std::memchr(name, '>', (size_t)(end - name));
+                if (gt == nullptr) return false;
+                if (gt[-1] == '/') { // self-closing <tag/> has no text
+                    p = gt + 1;
+                    continue;
+                }
+                const char *content = gt + 1;
+                const char *close = (const char *)std::memchr(content, '<', (size_t)(end - content));
+                if (close == nullptr) close = end;
+                while (content < close && isSpace(*content)) ++content;
+                while (close > content && isSpace(close[-1])) --close;
+                *outBegin = content;
+                *outEnd = close;
+                return true;
+            }
+        }
+        p = lt + 1;
+    }
+    return false;
+}
+
+// Case-insensitive test of whether [begin,end) begins with `prefix` (bounded, so
+// it classifies long values like "installable=<url>" without copying them).
+bool ciStartsWithN(const char *begin, const char *end, const char *prefix) {
+    for (size_t i = 0; prefix[i] != '\0'; ++i) {
+        if (begin + i >= end || lower(begin[i]) != lower(prefix[i])) return false;
+    }
+    return true;
+}
+
 } // namespace
 
 size_t dialBuildMSearch(char *out, size_t outSize, uint8_t mx) {
@@ -108,55 +156,22 @@ bool dialIsDialResponse(const char *data, size_t len) {
 }
 
 bool dialExtractTagText(const char *xml, size_t len, const char *tag, char *out, size_t outSize) {
-    if (xml == nullptr || tag == nullptr || out == nullptr || outSize == 0) return false;
-    const size_t tagLen = std::strlen(tag);
-    if (tagLen == 0) return false;
-
-    const char *p = xml;
-    const char *end = xml + len;
-    while (p < end) {
-        const char *lt = (const char *)std::memchr(p, '<', (size_t)(end - p));
-        if (lt == nullptr) return false;
-        const char *name = lt + 1;
-        // Match the tag name exactly (XML is case-sensitive), then require a
-        // boundary char so "<name" does not match "<names".
-        if ((size_t)(end - name) > tagLen && std::memcmp(name, tag, tagLen) == 0) {
-            char boundary = name[tagLen];
-            if (boundary == '>' || boundary == ' ' || boundary == '\t' || boundary == '/' ||
-                boundary == '\r' || boundary == '\n') {
-                // Advance to the end of the opening tag.
-                const char *gt = (const char *)std::memchr(name, '>', (size_t)(end - name));
-                if (gt == nullptr) return false;
-                if (gt[-1] == '/') { // self-closing <tag/> has no text
-                    p = gt + 1;
-                    continue;
-                }
-                const char *content = gt + 1;
-                const char *close = (const char *)std::memchr(content, '<', (size_t)(end - content));
-                if (close == nullptr) close = end;
-                return copyTrimmed(content, close, out, outSize);
-            }
-        }
-        p = lt + 1;
-    }
-    return false;
+    if (out == nullptr || outSize == 0) return false;
+    const char *begin = nullptr;
+    const char *end = nullptr;
+    if (!findTagText(xml, len, tag, &begin, &end)) return false;
+    return copyTrimmed(begin, end, out, outSize);
 }
 
 DialAppState dialParseAppState(const char *xml, size_t len) {
-    char state[32];
-    if (!dialExtractTagText(xml, len, "state", state, sizeof(state))) return DialAppState::Unknown;
-    // Compare case-insensitively against the known DIAL states.
-    auto starts = [](const char *s, const char *prefix) {
-        size_t n = std::strlen(prefix);
-        for (size_t i = 0; i < n; ++i) {
-            if (s[i] == '\0' || lower(s[i]) != lower(prefix[i])) return false;
-        }
-        return true;
-    };
-    if (starts(state, "running")) return DialAppState::Running;
-    if (starts(state, "stopped")) return DialAppState::Stopped;
-    if (starts(state, "hidden")) return DialAppState::Hidden;
-    if (starts(state, "installable")) return DialAppState::Installable;
+    const char *begin = nullptr;
+    const char *end = nullptr;
+    if (!findTagText(xml, len, "state", &begin, &end)) return DialAppState::Unknown;
+    // Classify by prefix in place — the "installable=<url>" value is unbounded.
+    if (ciStartsWithN(begin, end, "running")) return DialAppState::Running;
+    if (ciStartsWithN(begin, end, "stopped")) return DialAppState::Stopped;
+    if (ciStartsWithN(begin, end, "hidden")) return DialAppState::Hidden;
+    if (ciStartsWithN(begin, end, "installable")) return DialAppState::Installable;
     return DialAppState::Unknown;
 }
 
