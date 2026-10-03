@@ -26,6 +26,9 @@
 #include <NimBLEDevice.h> // BLE advertisement capture (OpenDroneID over BLE)
 #include <vector>
 
+#include "core/configPins.h" // bruceConfigPins (GPS pins/baud)
+#include <TinyGPS++.h>       // GPS fix for the radar origin
+
 // Detection store capacity: generous on PSRAM boards, small otherwise.
 #ifdef BOARD_HAS_PSRAM
 static constexpr size_t REMOTE_ID_CAPACITY = 48;
@@ -398,36 +401,69 @@ void remoteIdScanRun(uint32_t durationMs) {
     }
 }
 
-// --- on-device live list display ---
+// --- on-device display (live list + optional GPS radar) ---
 
-static void remoteIdRenderList(uint8_t channel) {
-    tft.fillScreen(bruceConfig.bgColor);
-    drawMainBorderWithTitle("Remote ID");
+static TinyGPSPlus g_gps;
+static HardwareSerial g_gpsSerial(2);
+static bool g_gpsStarted = false;
+static bool g_hasGpsFix = false;
+static int32_t g_originLatE7 = 0;
+static int32_t g_originLonE7 = 0;
+
+static void remoteIdGpsStart() {
+    g_hasGpsFix = false;
+    pinMode(bruceConfigPins.gps_bus.rx, INPUT);
+    g_gpsSerial.begin(
+        bruceConfigPins.gpsBaudrate, SERIAL_8N1, bruceConfigPins.gps_bus.rx, bruceConfigPins.gps_bus.tx
+    );
+    g_gpsStarted = true;
+}
+
+static void remoteIdGpsPump() {
+    if (!g_gpsStarted) return;
+    while (g_gpsSerial.available() > 0) g_gps.encode(g_gpsSerial.read());
+    if (g_gps.location.isValid()) {
+        g_originLatE7 = static_cast<int32_t>(g_gps.location.lat() * 1e7);
+        g_originLonE7 = static_cast<int32_t>(g_gps.location.lng() * 1e7);
+        g_hasGpsFix = true;
+    }
+}
+
+static void remoteIdGpsStop() {
+    if (!g_gpsStarted) return;
+    g_gpsSerial.end();
+    g_gpsStarted = false;
+}
+
+// Copy store entry i out under the lock (so tft rendering happens unlocked).
+static bool remoteIdCopyAt(size_t i, RemoteIdRecord &out) {
+    bool ok = false;
+    portENTER_CRITICAL(&g_mux);
+    const RemoteIdRecord *p = g_store.at(i);
+    if (p != nullptr) {
+        out = *p;
+        ok = true;
+    }
+    portEXIT_CRITICAL(&g_mux);
+    return ok;
+}
+
+static void remoteIdRenderListRegion(int16_t topY, int16_t bottomY, uint8_t channel) {
     tft.setTextSize(FP);
-    tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
-
     const int16_t x = 8;
     const int16_t lineH = LH * FP + 2;
-    int16_t y = BORDER_PAD_Y + FM * LH;
-
+    int16_t y = topY;
     const size_t count = remoteIdDetectedCount();
+    tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
     tft.setCursor(x, y);
-    tft.print("Drones:" + String((unsigned)count) + "  CH:" + String(channel));
+    tft.print(
+        "Drones:" + String((unsigned)count) + "  CH:" + String(channel) + (g_hasGpsFix ? "  GPS" : "")
+    );
     y += lineH + 2;
-
-    const int16_t bottom = tftHeight - lineH - 4; // leave room for footer
     char transports[16];
-    for (size_t i = 0; i < count && y < bottom; ++i) {
+    for (size_t i = 0; i < count && y < bottomY; ++i) {
         RemoteIdRecord r;
-        bool ok = false;
-        portENTER_CRITICAL(&g_mux);
-        const RemoteIdRecord *p = g_store.at(i);
-        if (p != nullptr) {
-            r = *p;
-            ok = true;
-        }
-        portEXIT_CRITICAL(&g_mux);
-        if (!ok) continue;
+        if (!remoteIdCopyAt(i, r)) continue;
         remoteIdFormatTransports(r.transportMask, transports, sizeof(transports));
         String id = r.hasUasId ? String(r.uasId) : macToString(r.mac);
         tft.setTextColor(r.isLost ? TFT_DARKGREY : bruceConfig.priColor, bruceConfig.bgColor);
@@ -435,9 +471,89 @@ static void remoteIdRenderList(uint8_t channel) {
         tft.print(String(r.rssi) + " [" + String(transports) + "] " + id);
         y += lineH;
     }
+}
+
+// GPS radar: center = you (green); drones plotted by bearing/distance (cyan),
+// their operators (magenta). Uses the pure model's projection helpers.
+static void remoteIdRenderRadarRegion(int16_t topY, int16_t bottomY) {
+    const int16_t h = bottomY - topY;
+    if (h < 24) return;
+    tft.drawRect(2, topY, tftWidth - 4, h, TFT_DARKGREY);
+    tft.drawFastVLine(tftWidth / 2, topY + 2, h - 4, TFT_DARKGREY);
+    tft.drawFastHLine(4, topY + h / 2, tftWidth - 8, TFT_DARKGREY);
+    tft.setTextColor(TFT_WHITE, bruceConfig.bgColor);
+    tft.setCursor(tftWidth / 2 - 3, topY + 2);
+    tft.print("N");
+
+    if (!g_hasGpsFix) {
+        tft.setTextColor(TFT_RED, bruceConfig.bgColor);
+        tft.drawCentreString("NO GPS FIX", tftWidth / 2, topY + h / 2 - 4, 1);
+        return;
+    }
+
+    const size_t count = remoteIdDetectedCount();
+    float radius = 50.0f;
+    RemoteIdRecord r;
+    for (size_t i = 0; i < count; ++i) {
+        if (!remoteIdCopyAt(i, r)) continue;
+        if (r.hasLocation) {
+            float d = remoteIdDistanceMeters(g_originLatE7, g_originLonE7, r.latitudeE7, r.longitudeE7);
+            if (d > radius) radius = d;
+        }
+        if (r.hasOperatorLocation) {
+            float d = remoteIdDistanceMeters(
+                g_originLatE7, g_originLonE7, r.operatorLatitudeE7, r.operatorLongitudeE7
+            );
+            if (d > radius) radius = d;
+        }
+    }
+    radius *= 1.15f;
+
+    tft.fillCircle(tftWidth / 2, topY + h / 2, 3, TFT_GREEN); // you / operator origin
+    for (size_t i = 0; i < count; ++i) {
+        if (!remoteIdCopyAt(i, r)) continue;
+        if (r.hasLocation) {
+            RemoteIdGridPoint p = remoteIdProjectToGrid(
+                r.latitudeE7, r.longitudeE7, g_originLatE7, g_originLonE7, tftWidth, h, radius, 6
+            );
+            if (p.visible) tft.fillCircle(p.x, topY + p.y, 3, TFT_CYAN);
+            else if (p.offGrid) tft.drawCircle(p.x, topY + p.y, 4, TFT_CYAN);
+        }
+        if (r.hasOperatorLocation) {
+            RemoteIdGridPoint p = remoteIdProjectToGrid(
+                r.operatorLatitudeE7, r.operatorLongitudeE7, g_originLatE7, g_originLonE7, tftWidth, h, radius,
+                6
+            );
+            if (p.visible) tft.fillCircle(p.x, topY + p.y, 3, TFT_MAGENTA);
+            else if (p.offGrid) tft.drawCircle(p.x, topY + p.y, 4, TFT_MAGENTA);
+        }
+    }
+
+    char radiusLabel[16];
+    remoteIdFormatGridRadius(radius, radiusLabel, sizeof(radiusLabel));
+    tft.setTextColor(TFT_WHITE, bruceConfig.bgColor);
+    tft.setCursor(4, bottomY - (LH * FP + 2));
+    tft.print("R " + String(radiusLabel));
+}
+
+static void remoteIdRender(uint8_t channel) {
+    tft.fillScreen(bruceConfig.bgColor);
+    drawMainBorderWithTitle("Remote ID");
+    const int16_t lineH = LH * FP + 2;
+    const int16_t top = BORDER_PAD_Y + FM * LH;
+    const int16_t contentBottom = tftHeight - lineH - 2; // above footer
+
+    // Big screens: list on top, GPS radar below. Small screens: list only.
+    if (remoteIdLayoutForDisplay(tftWidth, tftHeight) == RemoteIdLayout::SplitListGrid) {
+        const int16_t mid = top + (contentBottom - top) / 2;
+        remoteIdRenderListRegion(top, mid, channel);
+        remoteIdRenderRadarRegion(mid + 2, contentBottom);
+    } else {
+        remoteIdRenderListRegion(top, contentBottom, channel);
+    }
 
     tft.setTextColor(bruceConfig.priColor, bruceConfig.bgColor);
-    tft.setCursor(x, tftHeight - lineH - 2);
+    tft.setCursor(8, tftHeight - lineH);
     tft.print("ESC: exit");
 }
 
@@ -445,6 +561,7 @@ void remoteIdScanScreen() {
     returnToMenu = false;
     remoteIdStoreReset();
     remoteIdRadioStart();
+    remoteIdGpsStart();
     tft.fillScreen(bruceConfig.bgColor);
 
     size_t chIdx = 0;
@@ -456,6 +573,7 @@ void remoteIdScanScreen() {
             break;
         }
         const uint32_t now = millis();
+        remoteIdGpsPump();
         if (now - lastHop >= REMOTE_ID_HOP_MS) {
             chIdx = (chIdx + 1) % kChannelCount;
             esp_wifi_set_channel(kChannels[chIdx], WIFI_SECOND_CHAN_NONE);
@@ -468,12 +586,13 @@ void remoteIdScanScreen() {
             lastPrune = now;
         }
         if (now - lastRender >= 500) {
-            remoteIdRenderList(kChannels[chIdx]);
+            remoteIdRender(kChannels[chIdx]);
             lastRender = now;
         }
         vTaskDelay(10 / portTICK_PERIOD_MS);
     }
 
+    remoteIdGpsStop();
     remoteIdRadioStop();
 }
 
