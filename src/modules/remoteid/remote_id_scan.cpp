@@ -23,6 +23,9 @@
 #include "core/wifi/wifi_common.h" // ensureWifiPlatform, wifiDisconnect
 #include <globals.h>               // returnToMenu
 
+#include <NimBLEDevice.h> // BLE advertisement capture (OpenDroneID over BLE)
+#include <vector>
+
 // Detection store capacity: generous on PSRAM boards, small otherwise.
 #ifdef BOARD_HAS_PSRAM
 static constexpr size_t REMOTE_ID_CAPACITY = 48;
@@ -42,6 +45,7 @@ static RemoteIdRecord g_records[REMOTE_ID_CAPACITY];
 static RemoteIdStore g_store(g_records, REMOTE_ID_CAPACITY);
 static RemoteIdDecoder g_decoder;
 static portMUX_TYPE g_mux = portMUX_INITIALIZER_UNLOCKED;
+static bool g_bleStarted = false;
 
 // --- merge/observe helpers (adapted from ESP32Marauder WiFiScanRemoteId.h) ---
 
@@ -140,20 +144,13 @@ static void mergeRecord(RemoteIdRecord &destination, const RemoteIdRecord &sourc
     }
 }
 
-// Decode a management frame and merge the result into the store. The decode runs
-// outside the critical section; only the store mutation is locked.
-static void processWifiFrame(
-    const uint8_t *frame, size_t length, const uint8_t mac[6], int8_t rssi, uint8_t channel
+// Merge an already-decoded record into the store under the lock. Decoding must
+// happen in the caller (outside the lock) to keep the critical section short.
+// `channel` of 0 means "unknown" (e.g. BLE) and leaves lastWifiChannel untouched.
+static void mergeDecodedIntoStore(
+    const RemoteIdRecord &decoded, const uint8_t mac[6], RemoteIdTransport transport, int8_t rssi,
+    uint8_t channel
 ) {
-    RemoteIdRecord decoded;
-    RemoteIdTransport transport = RemoteIdTransport::WifiBeacon;
-    RemoteIdDecodeResult result = g_decoder.decodeWifiBeacon(frame, length, decoded);
-    if (result != RemoteIdDecodeResult::Decoded) {
-        result = g_decoder.decodeWifiNan(frame, length, decoded);
-        transport = RemoteIdTransport::WifiNan;
-    }
-    if (result != RemoteIdDecodeResult::Decoded) return;
-
     const uint32_t now = millis();
     portENTER_CRITICAL(&g_mux);
     RemoteIdRecord *record = decoded.hasUasId ? g_store.findByUasId(decoded.uasId) : nullptr;
@@ -177,9 +174,69 @@ static void processWifiFrame(
         updateKnownObservation(*record, mac, transport, rssi, now);
     }
     mergeRecord(*record, decoded);
-    record->lastWifiChannel = channel;
+    if (channel != 0) record->lastWifiChannel = channel;
     portEXIT_CRITICAL(&g_mux);
 }
+
+// Decode a WiFi management frame (Beacon or NAN action) and merge it. Decode runs
+// outside the lock; only mergeDecodedIntoStore takes the critical section.
+static void processWifiFrame(
+    const uint8_t *frame, size_t length, const uint8_t mac[6], int8_t rssi, uint8_t channel
+) {
+    RemoteIdRecord decoded;
+    RemoteIdTransport transport = RemoteIdTransport::WifiBeacon;
+    RemoteIdDecodeResult result = g_decoder.decodeWifiBeacon(frame, length, decoded);
+    if (result != RemoteIdDecodeResult::Decoded) {
+        result = g_decoder.decodeWifiNan(frame, length, decoded);
+        transport = RemoteIdTransport::WifiNan;
+    }
+    if (result != RemoteIdDecodeResult::Decoded) return;
+    mergeDecodedIntoStore(decoded, mac, transport, rssi, channel);
+}
+
+// Walk a BLE advertisement's AD structures for OpenDroneID service data (UUID
+// 0xFFFA, AD type 0x16) and merge any decode. Ported from ESP32Marauder's
+// processRemoteIdBlePayload.
+static void processBlePayload(
+    const uint8_t *payload, size_t length, const uint8_t mac[6], int8_t rssi, RemoteIdTransport transport
+) {
+    if (payload == nullptr) return;
+    size_t offset = 0;
+    while (offset < length) {
+        const size_t adLength = payload[offset];
+        if (adLength == 0) break;
+        if (offset + adLength + 1 > length) return;
+        const uint8_t adType = payload[offset + 1];
+        if (adType == 0x16 && adLength >= 4) { // service data with 16-bit UUID
+            RemoteIdRecord decoded;
+            if (g_decoder.decodeBleServiceData(payload + offset + 2, adLength - 1, decoded) ==
+                RemoteIdDecodeResult::Decoded) {
+                mergeDecodedIntoStore(decoded, mac, transport, rssi, 0);
+                return;
+            }
+        }
+        offset += adLength + 1;
+    }
+}
+
+// NimBLE passive-scan callback: feeds each advertisement's raw payload to the
+// OpenDroneID BLE decoder. Runs on the NimBLE host task; the store is guarded by
+// g_mux (shared with the WiFi promiscuous callback).
+class RemoteIdBleScanCallbacks : public NimBLEScanCallbacks {
+    void onResult(const NimBLEAdvertisedDevice *device) override {
+        const std::vector<uint8_t> &payload = device->getPayload();
+        if (payload.empty()) return;
+        // NimBLE stores the address LSB-first; reverse to natural MAC byte order so
+        // it matches the WiFi path (and macToString) for cross-transport merging.
+        uint8_t mac[6];
+        const uint8_t *val = device->getAddress().getVal();
+        for (int i = 0; i < 6; ++i) mac[i] = val[5 - i];
+        processBlePayload(
+            payload.data(), payload.size(), mac, device->getRSSI(), RemoteIdTransport::BleLegacy
+        );
+    }
+};
+static RemoteIdBleScanCallbacks g_bleScanCallbacks;
 
 static void remoteIdWifiCallback(void *buf, wifi_promiscuous_pkt_type_t type) {
     if (type != WIFI_PKT_MGMT || buf == nullptr) return;
@@ -229,6 +286,34 @@ static void dumpRecord(const RemoteIdRecord &r) {
 
 // --- shared radio lifecycle (mirrors sniffer.cpp) ---
 
+// Start a passive NimBLE scan feeding the OpenDroneID BLE decoder, concurrent with
+// WiFi promiscuous capture. NOTE: WiFi+BLE coexistence is only verifiable on
+// hardware. Passive scan covers legacy (BLE4) advertisements; BLE5 extended-adv
+// RID would need ext-adv support and is a later enhancement.
+static void remoteIdBleStart() {
+    if (!NimBLEDevice::isInitialized()) NimBLEDevice::init("");
+    NimBLEScan *scan = NimBLEDevice::getScan();
+    if (scan == nullptr) return;
+    scan->setScanCallbacks(&g_bleScanCallbacks, false);
+    scan->setActiveScan(false); // passive: RID is broadcast in advertisements
+    scan->setMaxResults(0);     // process in the callback; don't accumulate a list
+    scan->setInterval(97);
+    scan->setWindow(67);
+    scan->start(0, false, true); // 0 = scan continuously (async)
+    g_bleStarted = true;
+}
+
+static void remoteIdBleStop() {
+    if (!g_bleStarted) return;
+    NimBLEScan *scan = NimBLEDevice::getScan();
+    if (scan != nullptr) {
+        scan->stop();
+        scan->clearResults();
+    }
+    NimBLEDevice::deinit(true);
+    g_bleStarted = false;
+}
+
 static void remoteIdStoreReset() {
     portENTER_CRITICAL(&g_mux);
     g_store.clear();
@@ -246,9 +331,11 @@ static void remoteIdRadioStart() {
     esp_wifi_set_promiscuous(true);
     esp_wifi_set_promiscuous_rx_cb(remoteIdWifiCallback);
     esp_wifi_set_channel(kChannels[0], WIFI_SECOND_CHAN_NONE);
+    remoteIdBleStart();
 }
 
 static void remoteIdRadioStop() {
+    remoteIdBleStop();
     esp_wifi_set_promiscuous(false);
     esp_wifi_stop();
     esp_wifi_set_promiscuous_rx_cb(NULL);
