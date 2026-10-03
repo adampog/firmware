@@ -66,15 +66,9 @@
 #ifndef LED_OFF             // Infrared LED Off state
   #define LED_OFF 0
 #endif
-#ifndef FP                  // Small Font -> Font Pequena
-  #define FP 1
-#endif
-#ifndef FM                  // Medium Font -> Fonte Media
-  #define FM 2
-#endif
-#ifndef FG                  // LArge Font -> Fonte Grande
-  #define FG 3
-#endif
+// Font sizes (FP/FM/FG) moved to include/font_sizes.h: they are now scoped
+// constants (force-included everywhere) rather than global macros, so they no
+// longer collide with library identifiers such as FastLED's fl::FP.
 #ifndef ROTATION
   #define ROTATION 1
 #endif

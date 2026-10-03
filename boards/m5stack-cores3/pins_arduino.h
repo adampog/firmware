@@ -74,9 +74,9 @@ static const uint8_t ADC = 10;
 #define LED_OFF LOW
 
 // Font sizes
-#define FP 1
-#define FM 2
-#define FG 3
+#define BRUCE_FP 1
+#define BRUCE_FM 2
+#define BRUCE_FG 3
 
 // Screen Setup
 #define HAS_SCREEN

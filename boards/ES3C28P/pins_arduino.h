@@ -128,9 +128,9 @@ static const uint8_t MISO = SPI_MISO_PIN;
 // =============================================
 // Font Sizes
 // =============================================
-#define FP 1
-#define FM 2
-#define FG 3
+#define BRUCE_FP 1
+#define BRUCE_FM 2
+#define BRUCE_FG 3
 
 // =============================================
 // RGB LED (WS2812 NeoPixel)
