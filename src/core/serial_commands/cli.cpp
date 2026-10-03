@@ -6,6 +6,7 @@
 #include "interpreter_commands.h"
 #include "ir_commands.h"
 #include "power_commands.h"
+#include "remoteid_commands.h"
 #include "rf_commands.h"
 #include "rfid_commands.h"
 #include "screen_commands.h"
@@ -44,6 +45,7 @@ void SerialCli::setup() {
     createStorageCommands(&_cli);
     createUtilCommands(&_cli);
     createWifiCommands(&_cli);
+    createRemoteIdCommands(&_cli); // no-op unless -DBRUCE_REMOTEID
 
 #ifdef USB_as_HID
     createBadUsbCommands(&_cli);
