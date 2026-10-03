@@ -20,6 +20,7 @@
 #include "core/mykeyboard.h"       // check(), EscPress
 #include "core/net_utils.h"        // macToString
 #include "core/wifi/wifi_common.h" // ensureWifiPlatform, wifiDisconnect
+#include "modules/wifi/band_plan.h" // shared 2.4 / dual-band hop plan
 #include "pinescan_detector.h"
 #include <globals.h> // returnToMenu
 
@@ -31,8 +32,15 @@ static constexpr size_t PINESCAN_CAPACITY = 16;
 static constexpr uint32_t PINESCAN_SCAN_DEFAULT_MS = 30000;
 static constexpr uint32_t PINESCAN_HOP_MS = 300;
 
-static const uint8_t kChannels[] = {1, 6, 11, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13};
-static constexpr size_t kChannelCount = sizeof(kChannels) / sizeof(kChannels[0]);
+// Shared hop plan from band_plan: 2.4 GHz normally, 2.4+5 GHz on the ESP32-C5
+// (-DBRUCE_DUALBAND). The 2.4 plan is the former local {1,6,11,...} list.
+#ifdef BRUCE_DUALBAND
+static const uint8_t *const kChannels = kBruceChannelsDualBand;
+static const size_t kChannelCount = kBruceChannelsDualBandCount;
+#else
+static const uint8_t *const kChannels = kBruceChannels24;
+static const size_t kChannelCount = kBruceChannels24Count;
+#endif
 
 struct PineScanHit {
     uint8_t mac[6];

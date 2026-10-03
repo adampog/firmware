@@ -21,7 +21,8 @@
 #include "core/net_utils.h"        // macToString
 #include "core/wifi/wifi_common.h" // ensureWifiPlatform, wifiDisconnect
 #include "fox_hunt_detector.h"
-#include <globals.h> // returnToMenu, Option, loopOptions
+#include "modules/wifi/band_plan.h" // bruceScanChannelPlan (dual-band on C5)
+#include <globals.h>                // returnToMenu, Option, loopOptions
 
 static constexpr uint32_t FOX_SCAN_DEFAULT_MS = 60000;
 static constexpr uint32_t FOX_HOP_MS = 250;       // acquisition hop interval
@@ -31,13 +32,23 @@ static constexpr int FOX_ALPHA = 40;              // RSSI EMA smoothing (%)
 static constexpr int FOX_TREND_DEADBAND = 2;      // dB guard band for warmer/colder
 static constexpr int FOX_RSSI_FLOOR = -95;        // 0 bars
 static constexpr int FOX_RSSI_CEIL = -30;         // full bars
-static constexpr uint8_t FOX_MAX_24_CHANNEL = 13; // 2.4GHz round-robin upper bound
+[[maybe_unused]] static constexpr uint8_t FOX_MAX_24_CHANNEL = 13; // 2.4GHz round-robin upper bound
 
-// Next channel to tune while acquiring a target of unknown channel. In the
-// dual-band build (#4) this walks the 5GHz plan too; here it is the 2.4GHz
-// 1..13 round-robin from the ported foxHuntNextChannel helper.
+// Next channel to tune while acquiring a target of unknown channel. On a
+// dual-band board (-DBRUCE_DUALBAND, ESP32-C5) this walks the shared 2.4+5 GHz
+// hop plan; otherwise it is the 2.4 GHz 1..13 round-robin from the ported
+// foxHuntNextChannel helper.
 static uint8_t nextAcquireChannel(uint8_t current) {
+#ifdef BRUCE_DUALBAND
+    size_t count = 0;
+    const uint8_t *plan = bruceScanChannelPlan(&count);
+    for (size_t i = 0; i < count; ++i) {
+        if (plan[i] == current) return plan[(i + 1) % count];
+    }
+    return count ? plan[0] : current;
+#else
     return foxHuntNextChannel(current, FOX_MAX_24_CHANNEL);
+#endif
 }
 
 // --- shared hunt state (written from the promiscuous RX callback) ---

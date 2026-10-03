@@ -22,6 +22,7 @@
 #include "core/mykeyboard.h"       // check(), EscPress
 #include "core/net_utils.h"        // macToString
 #include "core/wifi/wifi_common.h" // ensureWifiPlatform, wifiDisconnect
+#include "modules/wifi/band_plan.h" // dual-band hop plan (ESP32-C5)
 #include <globals.h>               // returnToMenu
 
 #include <NimBLEDevice.h> // BLE advertisement capture (OpenDroneID over BLE)
@@ -40,10 +41,16 @@ static constexpr uint32_t REMOTE_ID_STALE_MS = 30000;
 static constexpr uint32_t REMOTE_ID_SCAN_DEFAULT_MS = 30000;
 static constexpr uint32_t REMOTE_ID_HOP_MS = 250;
 
-// 2.4GHz channel plan, CH6 first (ASTM-preferred NAN channel). Dual-band/5GHz
-// is a later enhancement.
+// 2.4GHz channel plan, CH6 first (ASTM-preferred NAN channel). On the ESP32-C5
+// (-DBRUCE_DUALBAND) sweep the shared 2.4+5 GHz plan so 5 GHz Remote-ID beacons
+// are captured too.
+#ifdef BRUCE_DUALBAND
+static const uint8_t *const kChannels = kBruceChannelsDualBand;
+static const size_t kChannelCount = kBruceChannelsDualBandCount;
+#else
 static const uint8_t kChannels[] = {6, 1, 11, 2, 3, 4, 5, 7, 8, 9, 10, 12, 13};
 static constexpr size_t kChannelCount = sizeof(kChannels) / sizeof(kChannels[0]);
+#endif
 
 static RemoteIdRecord g_records[REMOTE_ID_CAPACITY];
 static RemoteIdStore g_store(g_records, REMOTE_ID_CAPACITY);
