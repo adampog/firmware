@@ -52,7 +52,8 @@ static const uint8_t G46 = 46;
 static const uint8_t ADC1 = 7;
 static const uint8_t ADC2 = 8;
 
-#define SHIFT 0x80
+// (removed dead `#define SHIFT 0x80` -- unused, duplicated KEY_LEFT_CTRL, and its
+//  generic name collided with FastLED identifiers.)
 #define KEY_LEFT_CTRL 0x80
 #define KEY_LEFT_SHIFT 0x81
 #define KEY_LEFT_ALT 0x82
