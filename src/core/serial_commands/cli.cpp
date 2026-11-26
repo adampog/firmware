@@ -7,6 +7,7 @@
 #include "gpio_commands.h"
 #include "interpreter_commands.h"
 #include "ir_commands.h"
+#include "led_commands.h"
 #include "pinescan_commands.h"
 #include "power_commands.h"
 #include "remoteid_commands.h"
@@ -18,6 +19,7 @@
 #include "storage_commands.h"
 #include "util_commands.h"
 #include "wifi_commands.h"
+#include "wire_commands.h"
 #include <globals.h>
 
 void cliErrorCallback(cmd_error *e) {
@@ -53,16 +55,21 @@ void SerialCli::setup() {
     createFoxHuntCommands(&_cli);  // no-op unless -DBRUCE_FOXHUNT
     createDialCommands(&_cli);     // no-op unless -DBRUCE_DIAL
 
+#ifndef LITE_VERSION
+    createWireCommands(&_cli);
+#endif
+
 #ifdef USB_as_HID
     createBadUsbCommands(&_cli);
 #endif
 #ifndef LITE_VERSION
     createInterpreterCommands(&_cli);
 #endif
-#ifdef HAS_SCREEN
+#ifndef USE_DUMMY_TFT
     createScreenCommands(&_cli);
 #endif
-#if defined(HAS_NS4168_SPKR) || defined(BUZZ_PIN)
-    createSoundCommands(&_cli);
+#ifdef HAS_RGB_LED
+    createLedCommands(&_cli);
 #endif
+    createSoundCommands(&_cli);
 }

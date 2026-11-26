@@ -18,10 +18,12 @@
 // `::FP` does not clash with the namespaced `fl::FP`.
 //
 // Per-board overrides still work through the BRUCE_FP / BRUCE_FM / BRUCE_FG
-// config macros, set EITHER with -D in boards/<board>/*.ini OR with #define in a
-// board's pins_arduino.h (e.g. boards/marauder-mini uses FM=1, FG=2). We include
-// pins_arduino.h here so header-defined overrides are visible; -D overrides are
-// already on the command line. Boards that set neither get the 1/2/3 defaults.
+// config macros, set with -D in boards/<board>/*.ini and only when they differ
+// from the 1/2/3 defaults (e.g. boards/marauder-mini uses FM=1, FG=2). Upstream
+// Bruce spells these -DFP/-DFM/-DFG; when merging a new upstream board, rename
+// them to -DBRUCE_FP/-DBRUCE_FM/-DBRUCE_FG (the #error below catches a miss).
+// Per-board pins_arduino.h headers no longer exist (upstream "refactor fase 1");
+// the generic one is still included so the constants see the same environment.
 //
 // This header is force-included into every Bruce source file via build_src_flags
 // in platformio.ini, so FP/FM/FG are available everywhere the old macros were.
@@ -30,6 +32,10 @@
 // BOARD_HAS_PSRAM) could lock in wrong values.
 //
 #include <pins_arduino.h>  // pick up any board header BRUCE_F* overrides
+
+#if defined(FP) || defined(FM) || defined(FG)
+#error "FP/FM/FG must not be macros: use -DBRUCE_FP/-DBRUCE_FM/-DBRUCE_FG (see include/font_sizes.h)"
+#endif
 
 #ifndef BRUCE_FP
 #define BRUCE_FP 1  // small
